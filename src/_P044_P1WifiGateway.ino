@@ -11,7 +11,15 @@
 #define PLUGIN_044
 #define PLUGIN_ID_044         44
 #define PLUGIN_NAME_044       "Communication - P1 Wifi Gateway"
-#define PLUGIN_VALUENAME1_044 "P1WifiGateway"
+//#define PLUGIN_VALUENAME1_044 "P1WifiGateway"
+#define PLUGIN_VALUENAME1_044 "T1"
+#define PLUGIN_VALUENAME2_044 "T2"
+#define PLUGIN_VALUENAME3_044 "T1d"
+#define PLUGIN_VALUENAME4_044 "T2d"
+#define PLUGIN_VALUENAME5_044 "Win"
+#define PLUGIN_VALUENAME6_044 "Wout"
+#define PLUGIN_VALUENAME7_044 "Gas"
+#define PLUGIN_VALUENAME8_044 "Volt"
 
 #define STATUS_LED 12
 #define P044_BUFFER_SIZE 1024
@@ -29,9 +37,33 @@ unsigned int bytes_read = 0;
 boolean CRCcheck = false;
 unsigned int currCRC = 0;
 int checkI = 0;
+int sendskipcounter=1;
+long startupdelay=20;
+long startupcounter=0;
 
 WiFiServer *P1GatewayServer;
 WiFiClient P1GatewayClient;
+
+struct obis {
+ byte a;
+ byte b;
+ byte c;
+ byte d;
+ byte e;
+ byte f;
+};
+
+float wattsin=0;
+float wattsout=0;
+String volts;
+String Value0;
+String Value1;
+String Value2;
+String Value3;
+String Value4;
+String Value5;
+String Value6;
+String Value7;
 
 boolean Plugin_044(byte function, struct EventStruct *event, String& string)
 {
@@ -46,6 +78,9 @@ boolean Plugin_044(byte function, struct EventStruct *event, String& string)
       {
         Device[++deviceCount].Number = PLUGIN_ID_044;
         Device[deviceCount].Type = DEVICE_TYPE_SINGLE;
+        Device[deviceCount].VType = SENSOR_TYPE_HEXA;
+        Device[deviceCount].SendDataOption = true;
+        Device[deviceCount].ValueCount = 8;
         Device[deviceCount].Custom = true;
         Device[deviceCount].TimerOption = false;
         break;
@@ -60,6 +95,13 @@ boolean Plugin_044(byte function, struct EventStruct *event, String& string)
     case PLUGIN_GET_DEVICEVALUENAMES:
       {
         strcpy_P(ExtraTaskSettings.TaskDeviceValueNames[0], PSTR(PLUGIN_VALUENAME1_044));
+        strcpy_P(ExtraTaskSettings.TaskDeviceValueNames[1], PSTR(PLUGIN_VALUENAME2_044));
+        strcpy_P(ExtraTaskSettings.TaskDeviceValueNames[2], PSTR(PLUGIN_VALUENAME3_044));
+        strcpy_P(ExtraTaskSettings.TaskDeviceValueNames[4], PSTR(PLUGIN_VALUENAME5_044));
+        strcpy_P(ExtraTaskSettings.TaskDeviceValueNames[3], PSTR(PLUGIN_VALUENAME4_044));
+        strcpy_P(ExtraTaskSettings.TaskDeviceValueNames[5], PSTR(PLUGIN_VALUENAME6_044));
+        strcpy_P(ExtraTaskSettings.TaskDeviceValueNames[6], PSTR(PLUGIN_VALUENAME7_044));
+        strcpy_P(ExtraTaskSettings.TaskDeviceValueNames[7], PSTR(PLUGIN_VALUENAME8_044));
         break;
       }
 
@@ -68,6 +110,7 @@ boolean Plugin_044(byte function, struct EventStruct *event, String& string)
       	addFormNumericBox(string, F("TCP Port"), F("plugin_044_port"), ExtraTaskSettings.TaskDevicePluginConfigLong[0]);
       	addFormNumericBox(string, F("Baud Rate"), F("plugin_044_baud"), ExtraTaskSettings.TaskDevicePluginConfigLong[1]);
       	addFormNumericBox(string, F("Data bits"), F("plugin_044_data"), ExtraTaskSettings.TaskDevicePluginConfigLong[2]);
+
 
         byte choice = ExtraTaskSettings.TaskDevicePluginConfigLong[3];
         String options[3];
@@ -82,7 +125,10 @@ boolean Plugin_044(byte function, struct EventStruct *event, String& string)
       	addFormPinSelect(string, F("Reset target after boot"), F("taskdevicepin1"), Settings.TaskDevicePin1[event->TaskIndex]);
 
       	addFormNumericBox(string, F("RX Receive Timeout (mSec)"), F("plugin_044_rxwait"), Settings.TaskDevicePluginConfig[event->TaskIndex][0]);
-
+//P1 meter provides data for multiple domoticz idx devices. currently focus on gas, power and voltage. Amps may also be present, but is ignored.
+      	addFormNumericBox(string, F("G idx"), F("plugin_044_gas"), ExtraTaskSettings.TaskDevicePluginConfigLong[5]);
+      	addFormNumericBox(string, F("E idx"), F("plugin_044_elec"), ExtraTaskSettings.TaskDevicePluginConfigLong[6]);
+      	addFormNumericBox(string, F("V idx"), F("plugin_044_volt"), ExtraTaskSettings.TaskDevicePluginConfigLong[7]);
         success = true;
         break;
       }
@@ -94,6 +140,9 @@ boolean Plugin_044(byte function, struct EventStruct *event, String& string)
         ExtraTaskSettings.TaskDevicePluginConfigLong[2] = getFormItemInt(F("plugin_044_data"));
         ExtraTaskSettings.TaskDevicePluginConfigLong[3] = getFormItemInt(F("plugin_044_parity"));
         ExtraTaskSettings.TaskDevicePluginConfigLong[4] = getFormItemInt(F("plugin_044_stop"));
+        ExtraTaskSettings.TaskDevicePluginConfigLong[5] = getFormItemInt(F("plugin_044_gas"));
+        ExtraTaskSettings.TaskDevicePluginConfigLong[6] = getFormItemInt(F("plugin_044_elec"));
+        ExtraTaskSettings.TaskDevicePluginConfigLong[7] = getFormItemInt(F("plugin_044_volt"));
         Settings.TaskDevicePluginConfig[event->TaskIndex][0] = getFormItemInt(F("plugin_044_rxwait"));
 
         success = true;
@@ -109,8 +158,8 @@ boolean Plugin_044(byte function, struct EventStruct *event, String& string)
         if ((ExtraTaskSettings.TaskDevicePluginConfigLong[0] != 0) && (ExtraTaskSettings.TaskDevicePluginConfigLong[1] != 0))
         {
           byte serialconfig = 0x10;
-          serialconfig += ExtraTaskSettings.TaskDevicePluginConfigLong[3];
           serialconfig += (ExtraTaskSettings.TaskDevicePluginConfigLong[2] - 5) << 2;
+          serialconfig += ExtraTaskSettings.TaskDevicePluginConfigLong[3];
           if (ExtraTaskSettings.TaskDevicePluginConfigLong[4] == 2)
             serialconfig += 0x20;
           Serial.begin(ExtraTaskSettings.TaskDevicePluginConfigLong[1], (SerialConfig)serialconfig);
@@ -164,7 +213,7 @@ boolean Plugin_044(byte function, struct EventStruct *event, String& string)
       {
         if (Plugin_044_init)
         {
-          size_t bytes_read;
+         unsigned int bytes_read;
           if (P1GatewayServer->hasClient())
           {
             if (P1GatewayClient) P1GatewayClient.stop();
@@ -172,9 +221,10 @@ boolean Plugin_044(byte function, struct EventStruct *event, String& string)
             addLog(LOG_LEVEL_ERROR, F("P1   : Client connected!"));
           }
 
-          if (P1GatewayClient.connected())
+          if (P1GatewayClient.connected() or ( startupcounter++ > startupdelay ) )
           {
             connectionState = 1;
+            startupcounter=startupcounter+2;//ensure we keep running after initial startupdelay
             uint8_t net_buf[P044_BUFFER_SIZE];
             int count = P1GatewayClient.available();
             if (count > 0)
@@ -218,7 +268,7 @@ boolean Plugin_044(byte function, struct EventStruct *event, String& string)
       {
         if (Plugin_044_init)
         {
-          if (P1GatewayClient.connected())
+          if (P1GatewayClient.connected() or ( startupcounter > startupdelay ) )
           {
             int RXWait = Settings.TaskDevicePluginConfig[event->TaskIndex][0];
             if (RXWait == 0)
@@ -298,10 +348,167 @@ boolean Plugin_044(byte function, struct EventStruct *event, String& string)
                 Plugin_044_serial_buf[bytes_read] = '\n';
                 bytes_read++;
                 Plugin_044_serial_buf[bytes_read] = 0;
+
+              //if an idx was provided to send data to domoticz for Electricity, then we'll assume we're configured and can go into this section:
+              if ( ExtraTaskSettings.TaskDevicePluginConfigLong[6] >0 and sendskipcounter < 1 )
+              {
+                //Start of additions to send values to domoticz
+                //define some local variables:
+                //char mlinebuffer[1028];
+                struct obis po;
+                char Value[10][12];
+                char linebuffer[128];
+                String log = F("P1Wifi: copying data bytes_read '");
+
+                u_int pc=0;
+
+                for ( u_int lc = 0 ;lc < strlen(Plugin_044_serial_buf); lc++ )
+                {
+                  if (Plugin_044_serial_buf[lc] !='\n' and  Plugin_044_serial_buf[lc] != '\0' ){
+                    linebuffer[pc++]=Plugin_044_serial_buf[lc];
+                  }
+                  else
+                  {
+                    pc=0;
+                    // exclude line with serial nr where start character is missing.
+                    if (linebuffer[0] != '!' and linebuffer[0] != '/' and linebuffer[0] != 'X' and linebuffer[0] != ' ' and linebuffer[0] != '\n' and linebuffer[1] != '\n')
+                    {
+                      //get the values from the buffered data
+                      int i = GetObis(linebuffer, &po);
+                      // 1-0:1.8.1(00180.726*kWh) T1
+                      if (CompareObis(&po,1,0,1,8,1,255))
+                      {
+                         i = GetFloat(&linebuffer[i],Value[0]);
+                         Value0=(char*)Value[0];
+                         log =F("P1Wifi: T1: ");
+                         log +=  Value0;
+                         addLog(LOG_LEVEL_INFO, log);
+                    }
+                    //1-0:1.8.2(00001.416*kWh) T2
+                    else if (CompareObis(&po,1,0,1,8,2,255))
+                    {
+                       i = GetFloat(&linebuffer[i],Value[1]);
+                       Value1=(char*)Value[1];
+                       log =F("P1Wifi: T2: ");
+                       log +=  Value1;
+                       addLog(LOG_LEVEL_INFO, log);
+                    }
+                    // 1-0:2.8.1(00000.000*kWh)
+                    else if (CompareObis(&po,1,0,2,8,1,255))
+                    {
+                        i = GetFloat(&linebuffer[i],Value[2]);
+                        Value2=(char*)Value[2];
+                        //  publish("T1d",Value[2]);
+                        log =F("P1Wifi: T1d: ");
+                        log +=  Value2;
+                        addLog(LOG_LEVEL_INFO, log);
+                        //        UserVar[event->BaseVarIndex +2 ] = Value2.toFloat(); //T1d Value2
+                    }
+                    // 1-0:2.8.2(00000.000*kWh)
+                    else if (CompareObis(&po,1,0,2,8,2,255))
+                    {
+                      i = GetFloat(&linebuffer[i],Value[3]);
+                      Value3=(char*)Value[3];
+                      log =F("P1Wifi: T2d: ");
+                      log +=  Value3;
+                      addLog(LOG_LEVEL_INFO, log);
+                    }
+                    // 1-0:1.7.0(0000.42*kW)
+                    else if (CompareObis(&po,1,0,1,7,0,255))
+                    {
+                       i = GetFloat(&linebuffer[i],Value[4]);
+                       Value4=(char*)Value[4];
+                       wattsin=Value4.toFloat()*1000;
+                       Value4=wattsin;
+                       //Serial.print(" Va1ue4='");Serial.print(Value4);Serial.println("' ");
+                       log =F("P1Wifi: Win: ");
+                       log +=  Value4;
+                       addLog(LOG_LEVEL_INFO, log);
+                       //         UserVar[event->BaseVarIndex +4 ] = wattsin; //Win Value4
+                      // publish("Win",Value[4]);
+                    }
+                    // 1-0:2.7.0(0000.00*kW)
+                    else if (CompareObis(&po,1,0,2,7,0,255))
+                    {
+                       i = GetFloat(&linebuffer[i],Value[5]);
+                       Value5=(char*)Value[5];
+                       wattsout=Value5.toFloat()*1000;
+                       Value5=wattsout;
+                       //Serial.print(" Value5='");Serial.print(Value5);Serial.println("' ");
+                       // publish("Wout",Value[5]);
+                       log =F("P1Wifi: Wout: ");
+                       log +=  Value5;
+                       addLog(LOG_LEVEL_INFO, log);
+                       //         UserVar[event->BaseVarIndex +5 ] = wattsout; // Wout Value5
+                    }
+                    //0-1:24.2.1(170530203502S)(00236.270*m3)
+                    else if (CompareObis(&po,0,1,24,2,1,255))
+                    {
+                     i = GetFloat(&linebuffer[i],Value[6]);
+                     Value6=(char*)Value[6];
+                     log =F("P1Wifi: Gas: ");
+                     log +=  Value6;
+                     addLog(LOG_LEVEL_INFO, log);
+                     //         UserVar[event->BaseVarIndex] = Value6.toFloat(); //Gas Value6
+                    }
+                    // 1-0:32.7.0(222.0*V)
+                    else if (CompareObis(&po,1,0,32,7,0,255))
+                    {
+                      i = GetFloat(&linebuffer[i],Value[7]);
+                      volts=(char*)Value[7];
+                      Value7=volts;
+                      log =F("P1Wifi: Volt: ");
+                      log +=  Value7;
+                      addLog(LOG_LEVEL_INFO, log);
+                      //    UserVar[event->BaseVarIndex+2] = Value7.toFloat(); //Volt Value7
+                    }
+                    // Invalid Obis returns with po.d = 0 ...
+                    else if (CompareObis(&po,255,255,255,0,255,255))
+                    {
+                       i = GetFloat(&linebuffer[i],Value[8]);
+                       log =F("P1Wifi: invalid OBIS ");
+                       //log += linebuffer;
+                       addLog(LOG_LEVEL_INFO, log);
+                   };
+                 }
+               }
+             }
+             if (ExtraTaskSettings.TaskDevicePluginConfigLong[5] != 0)
+             {
+
+               if (Value0.toFloat() >0 and Value1.toFloat() >0 and Value2.toFloat() >=0 and Value3.toFloat() >=0 and Value4.toFloat() >=0 and Value5.toFloat() >=0)
+               {
+                    UserVar[event->BaseVarIndex ]    = Value0.toFloat()*1000;; //T1 Value0
+                    UserVar[event->BaseVarIndex +1 ] = Value1.toFloat()*1000; //T2 Value1
+                    UserVar[event->BaseVarIndex +2 ] = Value2.toFloat(); //T1d Value2
+                    UserVar[event->BaseVarIndex +3 ] = Value3.toFloat(); //T2d Value3
+                    UserVar[event->BaseVarIndex +4 ] = wattsin; //Win Value4
+                    UserVar[event->BaseVarIndex +5 ] = wattsout; // Wout Value5
+                    //addLog(LOG_LEVEL_INFO, F("P1Wifi: sending Electricity data));
+                    //sendData(event);
+                }
+
+                  if (Value6.toFloat() > 0 )
+                  {
+                    UserVar[event->BaseVarIndex +6 ] = Value6.toFloat()*1000; //Gas Value6
+                  }
+                  if (Value7.toFloat() > 10 )
+                  {
+                    UserVar[event->BaseVarIndex +7 ] = Value7.toFloat(); //Volt Value7
+                  }
+                }
+                sendskipcounter=1;
+              }
+              sendskipcounter--;
+              //end of additions
+        //addLog(LOG_LEVEL_DEBUG, F("P1Wifi: sending to client"));
+
+        if (P1GatewayClient.connected() ) {
                 P1GatewayClient.write((const uint8_t*)Plugin_044_serial_buf, bytes_read);
                 P1GatewayClient.flush();
-                addLog(LOG_LEVEL_DEBUG, F("P1   : data send!"));
+                addLog(LOG_LEVEL_INFO, F("P1Wifi  : data sent to port 8088!"));
                 blinkLED();
+        }
 
                 if (Settings.UseRules)
                 {
@@ -422,7 +629,132 @@ bool checkDatagram(int len) {
     if (!validCRCFound) {
       addLog(LOG_LEVEL_DEBUG, F("P1   : Error: invalid CRC found"));
     }
+    else{
+      String log = F("P1   : OK: valid CRC found");log += currCRC; addLog(LOG_LEVEL_DEBUG_MORE, log);
+  }
     currCRC = 0;
   }
   return validCRCFound;
+}
+
+
+
+// Additions for the P1 data extraction functions. These probably should be moved to MISC.ino
+const char *message[] = {
+ " \"svalue1\": \""," \"svalue2\": \""," \"svalue3\": \""," \"svalue4\": \""," \"svalue5\": \""," \"svalue6\": \""," \"svalue1\": \""," \"svalue1\": \"", " invalid:"};
+ // "T1","T2","T1d","T2d","Win","Wout","Gas", "\"svalue1\": \""};
+
+byte GetObis (char *p, struct obis *po) {
+ // return index to delimeter hit
+ byte i,a;
+ po->a = po->b = po->c = po->d = po->e = po->f = 0xff; // clear obis struct
+ i = a = 0;
+
+ while (isdigit(p[i]) || p[i] == '-' || p[i] == ':' || p[i] == '.' || p[i] == '*') { // Escape on any non valid OBIS character
+  if (isdigit(p[i])) {
+   if (a) {
+    a = a*10+p[i] - 0x30;
+   }
+   else
+    a = p[i] - 0x30;
+  }
+  if (p[i] == '-') {
+   po->a = a;
+   a=0;
+  }
+  else if (p[i] == ':') {
+   po->b = a;
+   a=0;
+  }
+  else if (p[i] == '.' && po->c == 0xff) {
+   po->c = a;
+   a=0;
+  }
+  else if (p[i] == '.' && po->d == 0xff) {
+   po->d = a;
+   a=0;
+  }
+  else if (p[i] == '*' ) {
+   po->e = a;
+   a=0;
+  }
+  i++;
+ }
+
+ // We bumped into a non valid character, determine the last obis field (C & D are mandatory)
+ if (po->d == 0xff) {     // D
+  po->d = a;
+ }
+ else if (po->e == 0xff) {  // E
+  po->e = a;
+ }
+ else if (po->f == 0xff) {   // F
+  po->f = a;
+ }
+ return i;
+}
+
+
+byte CompareObis (obis *po, byte a,byte b,byte c,byte d, byte e,byte f) {
+ return (po->a == a && po->b == b && po->c == c && po->d == d && po->e == e && po->f == f);
+}
+
+// Extracts string from a single line and return index to the next value (when available) or '0' on EOL
+byte GetString (char *s,char *d) {
+ byte i;
+ i=0;
+ while (s[i] != ')' && s[i] != 0) {
+  if (s[i] != '(') {
+   *d = s[i];
+   d++;
+  }
+  *d=0;
+  i++; // Advance to next
+ }
+ //
+ return ( s[i] == ')' && s[i+1] == '(' ? i+1 : 0 ); // 0 or index to next value
+}
+
+// Extracts float from a single line and return index to the next value (when available) or '0' on EOL
+byte GetFloat (char *s,char *d) {
+ byte i;
+ i=0;
+ char *datastart;
+ datastart=d;
+
+ while (s[i] != ')' && s[i] != 0) {
+  if (s[i] != '(') {
+   if (s[i] == '*')
+    *d=0;      // Terminate on unit, but keep for reference
+   else
+    *d = s[i];
+   // if (s[i] != '.')
+   d++; //this is to skip the decimal point. turns out domoticz needs that to be there, so disabled this line.
+
+  }
+  *d=0;
+  i++; // Advance to next
+}
+
+//Check for extra data field. The last one is correct for Gas.
+if (s[i+1] == '(' && s[i] != 0) {
+ i++;
+d=datastart;
+
+ while (s[i] != ')' && s[i] != 0) {
+   if (s[i] != '(') {
+    if (s[i] == '*')
+     *d=0;      // Terminate on unit, but keep for reference
+    else
+     *d = s[i];
+    // if (s[i] != '.')
+    d++;
+   }
+   *d=0;
+   i++; // Advance to next
+ }
+}
+// test
+return ( s[i] == ')' && s[i+1] == '(' ? i+1 : 0 );
+// or index to next value
 }

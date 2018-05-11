@@ -233,6 +233,38 @@ boolean CPlugin_002(byte function, struct EventStruct *event, String& string)
                 // values.toCharArray(str, 80);
                 // root[F("svalue")] =  str;
                 break;
+            case SENSOR_TYPE_PENTA:
+                root[F("nvalue")] = 0;
+                values  = formatUserVar(event, 0);
+                values += ";";
+                values += formatUserVar(event, 1);
+                values += ";";
+                values += formatUserVar(event, 2);
+                values += ";";
+                values += formatUserVar(event, 3);
+                values += ";";
+                values += formatUserVar(event, 4);
+                root[F("svalue")] =  values.c_str();
+                // values.toCharArray(str, 80);
+                // root[F("svalue")] =  str;
+                break;
+            case SENSOR_TYPE_HEXA:
+                root[F("nvalue")] = 0;
+                values  = formatUserVar(event, 0);
+                values += ";";
+                values += formatUserVar(event, 1);
+                values += ";";
+                values += formatUserVar(event, 2);
+                values += ";";
+                values += formatUserVar(event, 3);
+                values += ";";
+                values += formatUserVar(event, 4);
+                values += ";";
+                values += formatUserVar(event, 5);
+                root[F("svalue")] =  values.c_str();
+                // values.toCharArray(str, 80);
+                // root[F("svalue")] =  str;
+                break;
             case SENSOR_TYPE_SWITCH:
               root[F("command")] = String(F("switchlight"));
               if (UserVar[event->BaseVarIndex] == 0)

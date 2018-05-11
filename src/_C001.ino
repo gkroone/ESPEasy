@@ -134,6 +134,32 @@ boolean CPlugin_001(byte function, struct EventStruct *event, String& string)
               url += F(";");
               url += formatUserVar(event, 3);
               break;
+            case SENSOR_TYPE_PENTA:
+              url += F("&svalue=");
+              url += formatUserVar(event, 0);
+              url += F(";");
+              url += formatUserVar(event, 1);
+              url += F(";");
+              url += formatUserVar(event, 2);
+              url += F(";");
+              url += formatUserVar(event, 3);
+              url += F(";");
+              url += formatUserVar(event, 4);
+              break;
+            case SENSOR_TYPE_HEXA:
+              url += F("&svalue=");
+              url += formatUserVar(event, 0);
+              url += F(";");
+              url += formatUserVar(event, 1);
+              url += F(";");
+              url += formatUserVar(event, 2);
+              url += F(";");
+              url += formatUserVar(event, 3);
+              url += F(";");
+              url += formatUserVar(event, 4);
+              url += F(";");
+              url += formatUserVar(event, 5);
+              break;
             case SENSOR_TYPE_SWITCH:
               url = F("/json.htm?type=command&param=switchlight&idx=");
               url += event->idx;

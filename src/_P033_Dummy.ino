@@ -53,10 +53,12 @@ boolean Plugin_033(byte function, struct EventStruct *event, String& string)
         options[4] = F("SENSOR_TYPE_DUAL");
         options[5] = F("SENSOR_TYPE_TRIPLE");
         options[6] = F("SENSOR_TYPE_QUAD");
-        options[7] = F("SENSOR_TYPE_SWITCH");
-        options[8] = F("SENSOR_TYPE_DIMMER");
-        options[9] = F("SENSOR_TYPE_LONG");
-        options[10] = F("SENSOR_TYPE_WIND");
+        options[7] = F("SENSOR_TYPE_PENTA");
+        options[8] = F("SENSOR_TYPE_HEXA");
+        options[9] = F("SENSOR_TYPE_SWITCH");
+        options[10] = F("SENSOR_TYPE_DIMMER");
+        options[11] = F("SENSOR_TYPE_LONG");
+        options[12] = F("SENSOR_TYPE_WIND");
         int optionValues[11];
         optionValues[0] = SENSOR_TYPE_SINGLE;
         optionValues[1] = SENSOR_TYPE_TEMP_HUM;
@@ -65,12 +67,14 @@ boolean Plugin_033(byte function, struct EventStruct *event, String& string)
         optionValues[4] = SENSOR_TYPE_DUAL;
         optionValues[5] = SENSOR_TYPE_TRIPLE;
         optionValues[6] = SENSOR_TYPE_QUAD;
-        optionValues[7] = SENSOR_TYPE_SWITCH;
-        optionValues[8] = SENSOR_TYPE_DIMMER;
-        optionValues[9] = SENSOR_TYPE_LONG;
-        optionValues[10] = SENSOR_TYPE_WIND;
+        optionValues[7] = SENSOR_TYPE_PENTA;
+        optionValues[8] = SENSOR_TYPE_HEXA;
+        optionValues[9] = SENSOR_TYPE_SWITCH;
+        optionValues[10] = SENSOR_TYPE_DIMMER;
+        optionValues[11] = SENSOR_TYPE_LONG;
+        optionValues[12] = SENSOR_TYPE_WIND;
 
-        addFormSelector(string, F("Simulate Data Type"), F("plugin_033_sensortype"), 11, options, optionValues, choice );
+        addFormSelector(string, F("Simulate Data Type"), F("plugin_033_sensortype"), 13, options, optionValues, choice );
 
         success = true;
         break;
