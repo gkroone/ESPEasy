@@ -27,8 +27,9 @@
 #endif
 
 // MQTT_KEEPALIVE : keepAlive interval in Seconds
+// Keepalive timeout for default MQTT Broker is 10s
 #ifndef MQTT_KEEPALIVE
-#define MQTT_KEEPALIVE 15
+#define MQTT_KEEPALIVE 10
 #endif
 
 // MQTT_SOCKET_TIMEOUT: socket timeout interval in Seconds
@@ -73,7 +74,7 @@
 #define MQTTQOS1        (1 << 1)
 #define MQTTQOS2        (2 << 1)
 
-#ifdef ESP8266
+#if defined(ESP8266) || defined(ESP32)
 #include <functional>
 #define MQTT_CALLBACK_SIGNATURE std::function<void(char*, uint8_t*, unsigned int)> callback
 #else

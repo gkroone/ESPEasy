@@ -1,3 +1,4 @@
+#ifdef USES_P044
 //#################################### Plugin 044: P1WifiGateway ########################################
 //
 //  based on P020 Ser2Net, extended by Ronald Leenes romix/-at-/macuser.nl
@@ -83,6 +84,7 @@ boolean Plugin_044(byte function, struct EventStruct *event, String& string)
         Device[deviceCount].ValueCount = 8;
         Device[deviceCount].Custom = true;
         Device[deviceCount].TimerOption = false;
+        Device[deviceCount].GlobalSyncOption = true;
         break;
       }
 
@@ -107,9 +109,9 @@ boolean Plugin_044(byte function, struct EventStruct *event, String& string)
 
     case PLUGIN_WEBFORM_LOAD:
       {
-      	addFormNumericBox(string, F("TCP Port"), F("plugin_044_port"), ExtraTaskSettings.TaskDevicePluginConfigLong[0]);
-      	addFormNumericBox(string, F("Baud Rate"), F("plugin_044_baud"), ExtraTaskSettings.TaskDevicePluginConfigLong[1]);
-      	addFormNumericBox(string, F("Data bits"), F("plugin_044_data"), ExtraTaskSettings.TaskDevicePluginConfigLong[2]);
+      	addFormNumericBox(F("TCP Port"), F("plugin_044_port"), ExtraTaskSettings.TaskDevicePluginConfigLong[0]);
+      	addFormNumericBox(F("Baud Rate"), F("plugin_044_baud"), ExtraTaskSettings.TaskDevicePluginConfigLong[1]);
+      	addFormNumericBox(F("Data bits"), F("plugin_044_data"), ExtraTaskSettings.TaskDevicePluginConfigLong[2]);
 
 
         byte choice = ExtraTaskSettings.TaskDevicePluginConfigLong[3];
@@ -118,17 +120,18 @@ boolean Plugin_044(byte function, struct EventStruct *event, String& string)
         options[1] = F("Even");
         options[2] = F("Odd");
         int optionValues[3] = { 0, 2, 3 };
-        addFormSelector(string, F("Parity"), F("plugin_044_parity"), 3, options, optionValues, choice);
+        addFormSelector(F("Parity"), F("plugin_044_parity"), 3, options, optionValues, choice);
 
-      	addFormNumericBox(string, F("Stop bits"), F("plugin_044_stop"), ExtraTaskSettings.TaskDevicePluginConfigLong[4]);
+      	addFormNumericBox(F("Stop bits"), F("plugin_044_stop"), ExtraTaskSettings.TaskDevicePluginConfigLong[4]);
+        addFormNumericBox(F("RX Receive Timeout (mSec)"), F("plugin_044_rxwait"), Settings.TaskDevicePluginConfig[event->TaskIndex][0]);
+      //	addFormPinSelect(F("R"), F("taskdevicepin1"), Settings.TaskDevicePin1[event->TaskIndex]);
+      //  addFormPinSelect(F("Reset target after boot"), F("taskdevicepin1"), Settings.TaskDevicePin1[event->TaskIndex]);
 
-      	addFormPinSelect(string, F("Reset target after boot"), F("taskdevicepin1"), Settings.TaskDevicePin1[event->TaskIndex]);
-
-      	addFormNumericBox(string, F("RX Receive Timeout (mSec)"), F("plugin_044_rxwait"), Settings.TaskDevicePluginConfig[event->TaskIndex][0]);
+  //      addFormNumericBox(F("RX Receive Timeout (mSec)"), F("plugin_044_rxwait"), Settings.TaskDevicePluginConfig[event->TaskIndex][0]);
 //P1 meter provides data for multiple domoticz idx devices. currently focus on gas, power and voltage. Amps may also be present, but is ignored.
-      	addFormNumericBox(string, F("G idx"), F("plugin_044_gas"), ExtraTaskSettings.TaskDevicePluginConfigLong[5]);
-      	addFormNumericBox(string, F("E idx"), F("plugin_044_elec"), ExtraTaskSettings.TaskDevicePluginConfigLong[6]);
-      	addFormNumericBox(string, F("V idx"), F("plugin_044_volt"), ExtraTaskSettings.TaskDevicePluginConfigLong[7]);
+//      	addFormNumericBox(F("G idx"), F("plugin_044_gas"), ExtraTaskSettings.TaskDevicePluginConfigLong[5]);
+//      	addFormNumericBox(F("E idx"), F("plugin_044_elec"), ExtraTaskSettings.TaskDevicePluginConfigLong[6]);
+//      	addFormNumericBox(F("V idx"), F("plugin_044_volt"), ExtraTaskSettings.TaskDevicePluginConfigLong[7]);
         success = true;
         break;
       }
@@ -140,9 +143,9 @@ boolean Plugin_044(byte function, struct EventStruct *event, String& string)
         ExtraTaskSettings.TaskDevicePluginConfigLong[2] = getFormItemInt(F("plugin_044_data"));
         ExtraTaskSettings.TaskDevicePluginConfigLong[3] = getFormItemInt(F("plugin_044_parity"));
         ExtraTaskSettings.TaskDevicePluginConfigLong[4] = getFormItemInt(F("plugin_044_stop"));
-        ExtraTaskSettings.TaskDevicePluginConfigLong[5] = getFormItemInt(F("plugin_044_gas"));
-        ExtraTaskSettings.TaskDevicePluginConfigLong[6] = getFormItemInt(F("plugin_044_elec"));
-        ExtraTaskSettings.TaskDevicePluginConfigLong[7] = getFormItemInt(F("plugin_044_volt"));
+        //ExtraTaskSettings.TaskDevicePluginConfigLong[5] = getFormItemInt(F("plugin_044_gas"));
+        //ExtraTaskSettings.TaskDevicePluginConfigLong[6] = getFormItemInt(F("plugin_044_elec"));
+        //ExtraTaskSettings.TaskDevicePluginConfigLong[7] = getFormItemInt(F("plugin_044_volt"));
         Settings.TaskDevicePluginConfig[event->TaskIndex][0] = getFormItemInt(F("plugin_044_rxwait"));
 
         success = true;
@@ -157,12 +160,23 @@ boolean Plugin_044(byte function, struct EventStruct *event, String& string)
         LoadTaskSettings(event->TaskIndex);
         if ((ExtraTaskSettings.TaskDevicePluginConfigLong[0] != 0) && (ExtraTaskSettings.TaskDevicePluginConfigLong[1] != 0))
         {
-          byte serialconfig = 0x10;
-          serialconfig += (ExtraTaskSettings.TaskDevicePluginConfigLong[2] - 5) << 2;
+          #if defined(ESP8266)
+            byte serialconfig = 0x10;
+          #endif
+          #if defined(ESP32)
+            uint32_t serialconfig = 0x8000010;
+          #endif
           serialconfig += ExtraTaskSettings.TaskDevicePluginConfigLong[3];
+          serialconfig += (ExtraTaskSettings.TaskDevicePluginConfigLong[2] - 5) << 2;
+          //serialconfig += ExtraTaskSettings.TaskDevicePluginConfigLong[3];
           if (ExtraTaskSettings.TaskDevicePluginConfigLong[4] == 2)
             serialconfig += 0x20;
-          Serial.begin(ExtraTaskSettings.TaskDevicePluginConfigLong[1], (SerialConfig)serialconfig);
+          #if defined(ESP8266)
+            Serial.begin(ExtraTaskSettings.TaskDevicePluginConfigLong[1], (SerialConfig)serialconfig);
+          #endif
+          #if defined(ESP32)
+            Serial.begin(ExtraTaskSettings.TaskDevicePluginConfigLong[1], serialconfig);
+          #endif
           if (P1GatewayServer) P1GatewayServer->close();
           P1GatewayServer = new WiFiServer(ExtraTaskSettings.TaskDevicePluginConfigLong[0]);
           P1GatewayServer->begin();
@@ -544,7 +558,7 @@ void blinkLED() {
        checks whether the incoming character is a valid one for a P1 datagram. Returns false if not, which signals corrupt datagram
 */
 bool validP1char(char ch) {
-  if ((ch >= '0' && ch <= '9') || (ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') || (ch == '.') || (ch == '!') || (ch == 92) || (ch == 13) || (ch == '\n') || (ch == '(') || (ch == ')') || (ch == '-') || (ch == '*') || (ch == ':') )
+  if ((ch >= '0' && ch <= '9') || (ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') || (ch == '.') || (ch == '!') || (ch == ' ') || (ch == 92) || (ch == 13) || (ch == '\n') || (ch == '(') || (ch == ')') || (ch == '-') || (ch == '*') || (ch == ':') )
   {
     return true;
   } else {
@@ -758,3 +772,4 @@ d=datastart;
 return ( s[i] == ')' && s[i+1] == '(' ? i+1 : 0 );
 // or index to next value
 }
+#endif // USES_P044

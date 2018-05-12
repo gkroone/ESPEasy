@@ -1,8 +1,9 @@
+#ifdef USES_C012
 //#######################################################################################################
 //########################### Controller Plugin 012: Blynk  #############################################
 //#######################################################################################################
 
-#ifdef PLUGIN_BUILD_TESTING
+// #ifdef PLUGIN_BUILD_TESTING
 
 #define CPLUGIN_012
 #define CPLUGIN_ID_012         12
@@ -33,35 +34,14 @@ boolean CPlugin_012(byte function, struct EventStruct *event, String& string)
 
      case CPLUGIN_PROTOCOL_SEND:
       {
-        if (WiFi.status() != WL_CONNECTED) {
+        if (wifiStatus != ESPEASY_WIFI_SERVICES_INITIALIZED) {
           success = false;
           break;
         }
 
         String postDataStr = F("");
-
-        switch (event->sensorType)
-        {
-          case SENSOR_TYPE_SINGLE:                      // single value sensor, used for Dallas, BH1750, etc
-            success = CPlugin_012_send(event, 1);
-            break;
-          case SENSOR_TYPE_TEMP_HUM:                      // dual value
-          case SENSOR_TYPE_TEMP_BARO:
-          case SENSOR_TYPE_DUAL:
-            success = CPlugin_012_send(event, 2);
-            break;
-          case SENSOR_TYPE_TEMP_HUM_BARO:
-          case SENSOR_TYPE_TRIPLE:
-            success = CPlugin_012_send(event, 3);
-            break;
-          case SENSOR_TYPE_QUAD:
-            success = CPlugin_012_send(event, 4);
-            break;
-
-          case SENSOR_TYPE_SWITCH:
-            success = CPlugin_012_send(event, 1);
-            break;
-        }
+        const byte valueCount = getValueCountFromSensorType(event->sensorType);
+        success = CPlugin_012_send(event, valueCount);
         break;
       }
   }
@@ -75,7 +55,7 @@ boolean CPlugin_012_send(struct EventStruct *event, int nrValues) {
     postDataStr = F("update/V") ;
     postDataStr += event->idx + i;
     postDataStr += F("?value=");
-    postDataStr += formatUserVar(event, i);
+    postDataStr += formatUserVarNoCheck(event, i);
     success = Blynk_get(postDataStr, event->ControllerIndex);
   }
   return success;
@@ -84,7 +64,7 @@ boolean CPlugin_012_send(struct EventStruct *event, int nrValues) {
 
 boolean Blynk_get(const String& command, byte controllerIndex, float *data )
 {
-  if (WiFi.status() != WL_CONNECTED) {
+  if (wifiStatus != ESPEASY_WIFI_SERVICES_INITIALIZED) {
     return false;
   }
 

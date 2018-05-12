@@ -3,12 +3,10 @@
 //********************************************************************************
 void sendData(struct EventStruct *event)
 {
-  LoadTaskSettings(event->TaskIndex);
+  checkRAM(F("sendData"));
+ LoadTaskSettings(event->TaskIndex);
   if (Settings.UseRules)
     createRuleEvents(event->TaskIndex);
-
-  if (Settings.GlobalSync && Settings.TaskDeviceGlobalSync[event->TaskIndex])
-    SendUDPTaskData(0, event->TaskIndex, event->TaskIndex);
 
   if (Settings.UseValueLogger && Settings.InitSPI && Settings.Pin_sd_cs >= 0)
     SendValueLogger(event->TaskIndex);
@@ -62,11 +60,7 @@ void sendData(struct EventStruct *event)
 boolean validUserVar(struct EventStruct *event) {
   for (int i = 0; i < VARS_PER_TASK; ++i) {
     const float f(UserVar[event->BaseVarIndex + i]);
-    if (f == NAN)      return false; //("NaN");
-    if (f == INFINITY) return false; //("INFINITY");
-    if (-f == INFINITY)return false; //("-INFINITY");
-    if (isnan(f))      return false; //("isnan");
-    if (isinf(f))      return false; //("isinf");
+    if (!isValidFloat(f)) return false;
   }
   return true;
 }
@@ -95,14 +89,16 @@ void callback(char* c_topic, byte* b_payload, unsigned int length) {
   strncpy(c_payload,(char*)b_payload,length);
   c_payload[length] = 0;
 
+/*
   String log;
   log=F("MQTT : Topic: ");
   log+=c_topic;
-  addLog(LOG_LEVEL_DEBUG, log);
+  addLog(LOG_LEVEL_DEBUG_MORE, log);
 
   log=F("MQTT : Payload: ");
   log+=c_payload;
-  addLog(LOG_LEVEL_DEBUG, log);
+  addLog(LOG_LEVEL_DEBUG_MORE, log);
+  */
 
   // sprintf_P(log, PSTR("%s%s"), "MQTT : Topic: ", c_topic);
   // addLog(LOG_LEVEL_DEBUG, log);
@@ -120,13 +116,17 @@ void callback(char* c_topic, byte* b_payload, unsigned int length) {
 /*********************************************************************************************\
  * Connect to MQTT message broker
 \*********************************************************************************************/
-void MQTTConnect(int controller_idx)
+bool MQTTConnect(int controller_idx)
 {
-  if (!WiFiConnected(100)) return;
-  if (MQTTclient.connected())
-    MQTTclient.disconnect();
+  ++mqtt_reconnect_count;
   ControllerSettingsStruct ControllerSettings;
   LoadControllerSettings(controller_idx, (byte*)&ControllerSettings, sizeof(ControllerSettings));
+  if (!ControllerSettings.checkHostReachable(true))
+    return false;
+  if (MQTTclient.connected()) {
+    MQTTclient.disconnect();
+    updateMQTTclient_connected();
+  }
   if (ControllerSettings.UseDNS) {
     MQTTclient.setServer(ControllerSettings.getHost().c_str(), ControllerSettings.Port);
   } else {
@@ -137,74 +137,74 @@ void MQTTConnect(int controller_idx)
   // MQTT needs a unique clientname to subscribe to broker
   String clientid = F("ESPClient_");
   clientid += WiFi.macAddress();
-  String subscribeTo = "";
+
   String LWTTopic = ControllerSettings.Subscribe;
   LWTTopic.replace(F("/#"), F("/status"));
-  LWTTopic.replace(F("%sysname%"), Settings.Name);
+  parseSystemVariables(LWTTopic, false);
+  LWTTopic += F("/LWT"); // Extend the topic for status updates of connected/disconnected status.
 
-  for (byte x = 1; x < 3; x++)
-  {
-    String log = "";
-    boolean MQTTresult = false;
+  boolean MQTTresult = false;
+  uint8_t willQos = 0;
+  boolean willRetain = true;
 
-    if ((SecuritySettings.ControllerUser[controller_idx] != 0) && (SecuritySettings.ControllerPassword[controller_idx] != 0))
-      MQTTresult = MQTTclient.connect(clientid.c_str(), SecuritySettings.ControllerUser[controller_idx], SecuritySettings.ControllerPassword[controller_idx], LWTTopic.c_str(), 0, 0, "Connection Lost");
-    else
-      MQTTresult = MQTTclient.connect(clientid.c_str(), LWTTopic.c_str(), 0, 0, "Connection Lost");
-    yield();
-
-    if (MQTTresult)
-    {
-      MQTTclient_should_reconnect = false;
-      log = F("MQTT : Connected to broker with client ID: ");
-      log += clientid;
-      addLog(LOG_LEVEL_INFO, log);
-      subscribeTo = ControllerSettings.Subscribe;
-      subscribeTo.replace(F("%sysname%"), Settings.Name);
-      MQTTclient.subscribe(subscribeTo.c_str());
-      log = F("Subscribed to: ");
-      log += subscribeTo;
-      addLog(LOG_LEVEL_INFO, log);
-
-      MQTTclient.publish(LWTTopic.c_str(), "Connected", 1);
-
-      statusLED(true);
-      return; // end loop if succesfull
-    }
-    else
-    {
-      log = F("MQTT : ClientID ");
-      log += clientid;
-      log +=" failed to connected to broker";
-      addLog(LOG_LEVEL_ERROR, log);
-    }
-
-    delay(500);
+  if ((SecuritySettings.ControllerUser[controller_idx] != 0) && (SecuritySettings.ControllerPassword[controller_idx] != 0)) {
+    MQTTresult = MQTTclient.connect(clientid.c_str(), SecuritySettings.ControllerUser[controller_idx], SecuritySettings.ControllerPassword[controller_idx],
+                                    LWTTopic.c_str(), willQos, willRetain, "Connection Lost");
+  } else {
+    MQTTresult = MQTTclient.connect(clientid.c_str(), LWTTopic.c_str(), willQos, willRetain, "Connection Lost");
   }
+  yield();
+
+  if (!MQTTresult) {
+    addLog(LOG_LEVEL_ERROR, F("MQTT : Failed to connect to broker"));
+    return false;
+  }
+  MQTTclient_should_reconnect = false;
+  String log = F("MQTT : Connected to broker with client ID: ");
+  log += clientid;
+  addLog(LOG_LEVEL_INFO, log);
+  String subscribeTo = ControllerSettings.Subscribe;
+  parseSystemVariables(subscribeTo, false);
+  MQTTclient.subscribe(subscribeTo.c_str());
+  log = F("Subscribed to: ");
+  log += subscribeTo;
+  addLog(LOG_LEVEL_INFO, log);
+
+  if (MQTTclient.publish(LWTTopic.c_str(), "Connected", 1)) {
+    updateMQTTclient_connected();
+    statusLED(true);
+    mqtt_reconnect_count = 0;
+    return true; // end loop if succesfull
+  }
+  return false;
 }
 
 
 /*********************************************************************************************\
  * Check connection MQTT message broker
 \*********************************************************************************************/
-void MQTTCheck(int controller_idx)
+bool MQTTCheck(int controller_idx)
 {
+  if (!WiFiConnected(10)) {
+    return false;
+  }
   byte ProtocolIndex = getProtocolIndex(Settings.Protocol[controller_idx]);
   if (Protocol[ProtocolIndex].usesMQTT)
   {
-    if (MQTTclient_should_reconnect || !WiFiConnected(100) || !MQTTclient.connected())
+    if (MQTTclient_should_reconnect || !MQTTclient.connected())
     {
       if (MQTTclient_should_reconnect) {
         addLog(LOG_LEVEL_ERROR, F("MQTT : Intentional reconnect"));
       } else {
-        addLog(LOG_LEVEL_ERROR, F("MQTT : Connection lost"));
         connectionFailures += 2;
       }
-      MQTTConnect(controller_idx);
-    }
-    else if (connectionFailures)
+      return MQTTConnect(controller_idx);
+    } else if (connectionFailures) {
       connectionFailures--;
+    }
   }
+  // When no MQTT protocol is enabled, all is fine.
+  return true;
 }
 
 
@@ -231,10 +231,11 @@ void SendStatus(byte source, String status)
 
 boolean MQTTpublish(int controller_idx, const char* topic, const char* payload, boolean retained)
 {
-  if (MQTTclient.publish(topic, payload, retained))
+  if (MQTTclient.publish(topic, payload, retained)) {
+    timermqtt = millis() + 10; // Make sure the MQTT is being processed as soon as possible.
     return true;
+  }
   addLog(LOG_LEVEL_DEBUG, F("MQTT : publish failed"));
-  MQTTConnect(controller_idx);
   return false;
 }
 
@@ -249,7 +250,7 @@ void MQTTStatus(String& status)
     LoadControllerSettings(enabledMqttController, (byte*)&ControllerSettings, sizeof(ControllerSettings));
     String pubname = ControllerSettings.Subscribe;
     pubname.replace(F("/#"), F("/status"));
-    pubname.replace(F("%sysname%"), Settings.Name);
+    parseSystemVariables(pubname, false);
     MQTTpublish(enabledMqttController, pubname.c_str(), status.c_str(),Settings.MQTTRetainFlag);
   }
 }

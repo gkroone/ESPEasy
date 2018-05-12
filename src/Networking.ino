@@ -2,27 +2,34 @@
 // Syslog
 // UDP system messaging
 // SSDP
-  #if LWIP_VERSION_MAJOR == 2
-   #define IP2STR(addr) (uint8_t)((uint32_t)addr &  0xFF), (uint8_t)(((uint32_t)addr >> 8) &  0xFF), (uint8_t)(((uint32_t)addr >> 16) &  0xFF), (uint8_t)(((uint32_t)addr >> 24) &  0xFF)
-  #endif
-
+//  #if LWIP_VERSION_MAJOR == 2
+#define IPADDR2STR(addr) (uint8_t)((uint32_t)addr &  0xFF), (uint8_t)(((uint32_t)addr >> 8) &  0xFF), (uint8_t)(((uint32_t)addr >> 16) &  0xFF), (uint8_t)(((uint32_t)addr >> 24) &  0xFF)
+//  #endif
 
 
 /*********************************************************************************************\
    Syslog client
   \*********************************************************************************************/
-void syslog(const char *message)
+void syslog(byte logLevel, const char *message)
 {
-  if (Settings.Syslog_IP[0] != 0 && WiFi.status() == WL_CONNECTED)
+  if (Settings.Syslog_IP[0] != 0 && wifiStatus == ESPEASY_WIFI_SERVICES_INITIALIZED)
   {
     IPAddress broadcastIP(Settings.Syslog_IP[0], Settings.Syslog_IP[1], Settings.Syslog_IP[2], Settings.Syslog_IP[3]);
     portUDP.beginPacket(broadcastIP, 514);
     char str[256];
     str[0] = 0;
+    byte prio = Settings.SyslogFacility * 8;
+    if ( logLevel == LOG_LEVEL_ERROR )
+      prio += 3;  // syslog error
+    else if ( logLevel == LOG_LEVEL_INFO )
+      prio += 5;  // syslog notice
+    else
+      prio += 7;
+
 	// An RFC3164 compliant message must be formated like :  "<PRIO>[TimeStamp ]Hostname TaskName: Message"
 
 	// Using Settings.Name as the Hostname (Hostname must NOT content space)
-    snprintf_P(str, sizeof(str), PSTR("<7>%s EspEasy: %s"), Settings.Name, message);
+    snprintf_P(str, sizeof(str), PSTR("<%u>%s EspEasy: %s"), prio, Settings.Name, message);
 
 	// Using Setting.Unit to build a Hostname
     //snprintf_P(str, sizeof(str), PSTR("<7>EspEasy_%u ESP: %s"), Settings.Unit, message);
@@ -36,35 +43,6 @@ void syslog(const char *message)
   }
 }
 
-
-/*********************************************************************************************\
-   Structs for UDP messaging
-  \*********************************************************************************************/
-struct infoStruct
-{
-  byte header = 255;
-  byte ID = 3;
-  byte sourcelUnit;
-  byte destUnit;
-  byte sourceTaskIndex;
-  byte destTaskIndex;
-  byte deviceNumber;
-  char taskName[26];
-  char ValueNames[VARS_PER_TASK][26];
-};
-
-struct dataStruct
-{
-  byte header = 255;
-  byte ID = 5;
-  byte sourcelUnit;
-  byte destUnit;
-  byte sourceTaskIndex;
-  byte destTaskIndex;
-  float Values[VARS_PER_TASK];
-};
-
-//TODO: add sysinfoStruct
 
 /*********************************************************************************************\
    Check UDP messages (ESPEasy propiertary protocol)
@@ -109,22 +87,10 @@ void checkUDP()
     }
     else
     {
-      if (packetBuffer[1] > 1 && packetBuffer[1] < 6)
-      {
-        String log = (F("UDP  : Sensor msg "));
-        for (byte x = 1; x < 6; x++)
-        {
-          log += " ";
-          log += (int)packetBuffer[x];
-        }
-        addLog(LOG_LEVEL_DEBUG_MORE, log);
-      }
-
       // binary data!
       switch (packetBuffer[1])
       {
 
-        //TODO: use a nice struct for it
         case 1: // sysinfo message
           {
             byte mac[6];
@@ -161,70 +127,13 @@ void checkUDP()
             break;
           }
 
-        case 2: // sensor info pull request
-          {
-            SendUDPTaskInfo(packetBuffer[2], packetBuffer[5], packetBuffer[4]);
-            break;
-          }
-
-        case 3: // sensor info
-          {
-            if (Settings.GlobalSync)
-            {
-              struct infoStruct infoReply;
-              memcpy((byte*)&infoReply, (byte*)&packetBuffer, sizeof(infoStruct));
-
-              // to prevent flash wear out (bugs in communication?) we can only write to an empty task
-              // so it will write only once and has to be cleared manually through webgui
-              if (Settings.TaskDeviceNumber[infoReply.destTaskIndex] == 0)
-              {
-                Settings.TaskDeviceNumber[infoReply.destTaskIndex] = infoReply.deviceNumber;
-                Settings.TaskDeviceDataFeed[infoReply.destTaskIndex] = 1;  // remote feed
-                for (byte x=0; x < CONTROLLER_MAX; x++)
-                  Settings.TaskDeviceSendData[x][infoReply.destTaskIndex] = false;
-                strcpy(ExtraTaskSettings.TaskDeviceName, infoReply.taskName);
-                for (byte x = 0; x < VARS_PER_TASK; x++)
-                  strcpy( ExtraTaskSettings.TaskDeviceValueNames[x], infoReply.ValueNames[x]);
-                SaveTaskSettings(infoReply.destTaskIndex);
-                SaveSettings();
-              }
-            }
-            break;
-          }
-
-        case 4: // sensor data pull request
-          {
-            SendUDPTaskData(packetBuffer[2], packetBuffer[5], packetBuffer[4]);
-            break;
-          }
-
-        case 5: // sensor data
-          {
-            if (Settings.GlobalSync)
-            {
-              struct dataStruct dataReply;
-              memcpy((byte*)&dataReply, (byte*)&packetBuffer, sizeof(dataStruct));
-
-              // only if this task has a remote feed, update values
-              if (Settings.TaskDeviceDataFeed[dataReply.destTaskIndex] != 0)
-              {
-                for (byte x = 0; x < VARS_PER_TASK; x++)
-                {
-                  UserVar[dataReply.destTaskIndex * VARS_PER_TASK + x] = dataReply.Values[x];
-                }
-                if (Settings.UseRules)
-                  createRuleEvents(dataReply.destTaskIndex);
-              }
-            }
-            break;
-          }
-
         default:
           {
             struct EventStruct TempEvent;
             TempEvent.Data = (byte*)packetBuffer;
             TempEvent.Par1 = remoteIP[3];
             PluginCall(PLUGIN_UDP_IN, &TempEvent, dummyString);
+            CPluginCall(CPLUGIN_UDP_IN, &TempEvent);
             break;
           }
       }
@@ -234,73 +143,6 @@ void checkUDP()
     portUDP.flush();
   #endif
   runningUPDCheck = false;
-}
-
-
-/*********************************************************************************************\
-   Send task info using UDP message
-  \*********************************************************************************************/
-void SendUDPTaskInfo(byte destUnit, byte sourceTaskIndex, byte destTaskIndex)
-{
-  if (!WiFiConnected(100)) {
-    return;
-  }
-  struct infoStruct infoReply;
-  infoReply.sourcelUnit = Settings.Unit;
-  infoReply.sourceTaskIndex = sourceTaskIndex;
-  infoReply.destTaskIndex = destTaskIndex;
-  LoadTaskSettings(infoReply.sourceTaskIndex);
-  infoReply.deviceNumber = Settings.TaskDeviceNumber[infoReply.sourceTaskIndex];
-  strcpy(infoReply.taskName, ExtraTaskSettings.TaskDeviceName);
-  for (byte x = 0; x < VARS_PER_TASK; x++)
-    strcpy(infoReply.ValueNames[x], ExtraTaskSettings.TaskDeviceValueNames[x]);
-
-  byte firstUnit = 1;
-  byte lastUnit = UNIT_MAX - 1;
-  if (destUnit != 0)
-  {
-    firstUnit = destUnit;
-    lastUnit = destUnit;
-  }
-  for (byte x = firstUnit; x <= lastUnit; x++)
-  {
-    infoReply.destUnit = x;
-    sendUDP(x, (byte*)&infoReply, sizeof(infoStruct));
-    delay(10);
-  }
-  delay(50);
-}
-
-
-/*********************************************************************************************\
-   Send task data using UDP message
-  \*********************************************************************************************/
-void SendUDPTaskData(byte destUnit, byte sourceTaskIndex, byte destTaskIndex)
-{
-  if (!WiFiConnected(100)) {
-    return;
-  }
-  struct dataStruct dataReply;
-  dataReply.sourcelUnit = Settings.Unit;
-  dataReply.sourceTaskIndex = sourceTaskIndex;
-  dataReply.destTaskIndex = destTaskIndex;
-  for (byte x = 0; x < VARS_PER_TASK; x++)
-    dataReply.Values[x] = UserVar[dataReply.sourceTaskIndex * VARS_PER_TASK + x];
-
-  byte firstUnit = 1;
-  byte lastUnit = UNIT_MAX - 1;
-  if (destUnit != 0)
-  {
-    firstUnit = destUnit;
-    lastUnit = destUnit;
-  }
-  for (byte x = firstUnit; x <= lastUnit; x++)
-  {
-    dataReply.destUnit = x;
-    sendUDP(x, (byte*) &dataReply, sizeof(dataStruct));
-    delay(10);
-  }
-  delay(50);
 }
 
 
@@ -600,7 +442,7 @@ void SSDP_send(byte method) {
                      SSDP_INTERVAL,
                      Settings.Build,
                      uuid,
-                     IP2STR(&ip)
+                     IPADDR2STR(&ip)
                     );
 
   _server->append(buffer, len);
@@ -752,16 +594,20 @@ void SSDP_update() {
       _server->flush();
   }
 }
+#endif
 
-// Check WiFi connection. Maximum timeout 2000 msec.
+// Check WiFi connection. Maximum timeout 500 msec.
 bool WiFiConnected(uint32_t timeout_ms) {
-  uint32_t timer = millis() + (timeout_ms > 2000 ? 2000 : timeout_ms);
-  uint32_t min_delay = timeout_ms / 10;
+  uint32_t timer = millis() + (timeout_ms > 500 ? 500 : timeout_ms);
+  uint32_t min_delay = timeout_ms / 20;
   if (min_delay < 10) {
     yield(); // Allow at least once time for backgroundtasks
     min_delay = 10;
   }
-  while (WiFi.status() != WL_CONNECTED) {
+  // Apparently something needs network, perform check to see if it is ready now.
+//  if (!tryConnectWiFi())
+//    return false;
+  while (!WiFiConnected()) {
     if (timeOutReached(timer)) {
       return false;
     }
@@ -769,4 +615,41 @@ bool WiFiConnected(uint32_t timeout_ms) {
   }
   return true;
 }
+
+bool hostReachable(const IPAddress& ip) {
+  if (!WiFiConnected()) return false;
+  // Only do 1 ping at a time to return early
+  byte retry = 3;
+  while (retry > 0) {
+#if defined(ESP8266)
+    if (Ping.ping(ip, 1)) return true;
 #endif
+#if defined(ESP32)
+  if (ping_start(ip, 4, 0, 0, 5)) return true;
+#endif
+    delay(50);
+    --retry;
+  }
+  String log = F("Host unreachable: ");
+  log += formatIP(ip);
+  addLog(LOG_LEVEL_ERROR, log);
+  if (ip[1] == 0 && ip[2] == 0 && ip[3] == 0) {
+    // Work-around to fix connected but not able to communicate.
+    addLog(LOG_LEVEL_ERROR, F("Wifi  : Detected strange behavior, reconnect wifi."));
+    WifiDisconnect();
+  }
+  logConnectionStatus();
+  return false;
+}
+
+bool hostReachable(const String& hostname) {
+  if (!WiFiConnected()) return false;
+  IPAddress remote_addr;
+  if (WiFi.hostByName(hostname.c_str(), remote_addr)) {
+    return hostReachable(remote_addr);
+  }
+  String log = F("Hostname cannot be resolved: ");
+  log += hostname;
+  addLog(LOG_LEVEL_ERROR, log);
+  return false;
+}

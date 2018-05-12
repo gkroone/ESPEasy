@@ -1,3 +1,4 @@
+#ifdef USES_P037
 //#######################################################################################################
 //#################################### Plugin 037: MQTT Import ##########################################
 //#######################################################################################################
@@ -19,8 +20,26 @@
 
 // Declare a Wifi client for this plugin only
 
+// TODO TD-er: These must be kept in some vector to allow multiple instances of MQTT import.
 WiFiClient espclient_037;
-PubSubClient *MQTTclient_037;
+PubSubClient *MQTTclient_037 = NULL;
+bool MQTTclient_037_connected = false;
+
+void Plugin_037_update_connect_status() {
+  bool connected = false;
+  if (MQTTclient_037 != NULL) {
+    connected = MQTTclient_037->connected();
+  }
+  if (MQTTclient_037_connected != connected) {
+    MQTTclient_037_connected = !MQTTclient_037_connected;
+    if (Settings.UseRules) {
+      String event = connected ? F("MQTTimport#Connected") : F("MQTTimport#Disconnected");
+      rulesProcessing(event);
+    }
+    if (!connected)
+      addLog(LOG_LEVEL_ERROR, F("IMPT : MQTT 037 Connection lost"));
+  }
+}
 
 boolean Plugin_037(byte function, struct EventStruct *event, String& string)
 {
@@ -73,7 +92,7 @@ boolean Plugin_037(byte function, struct EventStruct *event, String& string)
 
         for (byte varNr = 0; varNr < 4; varNr++)
         {
-        	addFormTextBox(string, String(F("MQTT Topic ")) + (varNr + 1), String(F("Plugin_037_template")) +
+        	addFormTextBox(String(F("MQTT Topic ")) + (varNr + 1), String(F("Plugin_037_template")) +
         			(varNr + 1), deviceTemplate[varNr], 40);
         }
         success = true;
@@ -121,7 +140,9 @@ boolean Plugin_037(byte function, struct EventStruct *event, String& string)
 
     case PLUGIN_TEN_PER_SECOND:
       {
-        MQTTclient_037->loop();		// Listen out for callbacks
+        if (!MQTTclient_037->loop()) {		// Listen out for callbacks
+          Plugin_037_update_connect_status();
+        }
         success = true;
         break;
       }
@@ -133,13 +154,11 @@ boolean Plugin_037(byte function, struct EventStruct *event, String& string)
         if (!MQTTclient_037->connected() || MQTTclient_should_reconnect) {
           if (MQTTclient_should_reconnect) {
             addLog(LOG_LEVEL_ERROR, F("IMPT : MQTT 037 Intentional reconnect"));
-          } else {
-            addLog(LOG_LEVEL_ERROR, F("IMPT : MQTT 037 Connection lost"));
           }
 
-
           MQTTclient_037->disconnect();
-          delay(1000);
+          Plugin_037_update_connect_status();
+          delay(250);
 
           if (! MQTTConnect_037(ClientName)) {
             success = false;
@@ -166,13 +185,11 @@ boolean Plugin_037(byte function, struct EventStruct *event, String& string)
         // This is a private option only used by the MQTT 037 callback function
 
         //      Get the payload and check it out
-
-        String Payload = event->String2;
-        float floatPayload = string2float(Payload);
-
         LoadTaskSettings(event->TaskIndex);
 
-        if (floatPayload == -999) {
+        String Payload = event->String2;
+        float floatPayload;
+        if (!string2float(Payload, floatPayload)) {
           String log = F("IMPT : Bad Import MQTT Command ");
           log += event->String1;
           addLog(LOG_LEVEL_ERROR, log);
@@ -340,7 +357,8 @@ boolean MQTTConnect_037(String clientid)
   if (MQTTclient_037->connected()) return true;
 
   // define stuff for the client - this could also be done in the intial declaration of MQTTclient_037
-  if (!WiFiConnected(1000)) {
+  if (!WiFiConnected(100)) {
+    Plugin_037_update_connect_status();
     return false; // Not connected, so no use in wasting time to connect to a host.
   }
   ControllerSettingsStruct ControllerSettings;
@@ -381,7 +399,7 @@ boolean MQTTConnect_037(String clientid)
 
     delay(500);
   }
-
+  Plugin_037_update_connect_status();
   return MQTTclient_037->connected();
 }
 
@@ -450,41 +468,4 @@ boolean MQTTCheckSubscription_037(String Topic, String Subscription) {
   }
   return false;
 }
-
-//	***************************************************************************
-// Convert String to float - returns -999 in case of error
-float string2float(String myString) {
-  int i, len;
-  float value;
-  len = myString.length();
-  char tmp[(len + 1)];       // one extra for the zero termination
-  byte start = 0;
-  //  Look for decimal point - they can be anywhere but no more than one of them!
-  int dotIndex = myString.indexOf('.');
-  //Serial.println(dotIndex);
-
-  if (dotIndex != -1)
-  {
-    int dotIndex2 = (myString.substring(dotIndex + 1)).indexOf('.');
-    //Serial.println(dotIndex2);
-    if (dotIndex2 != -1)return -999.00;    // Give error if there is more than one dot
-  }
-
-  if (myString.charAt(0) == '-') {
-    tmp[0] = '-';
-    start = 1;   //allow a minus in front of string
-  }
-
-  for (i = start; i < len; i++)
-  {
-    tmp[i] = myString.charAt(i);
-    if (!isdigit(tmp[i]))
-    {
-      if (tmp[i] != '.')return -999;
-    }
-  }
-
-  tmp[i] = 0;
-  value = atof(tmp);
-  return value;
-}
+#endif // USES_P037

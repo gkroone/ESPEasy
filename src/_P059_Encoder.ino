@@ -1,3 +1,4 @@
+#ifdef USES_P059
 //#######################################################################################################
 //#################################### Plugin 059: Rotary Encoder #######################################
 //#######################################################################################################
@@ -85,10 +86,10 @@ boolean Plugin_059(byte function, struct EventStruct *event, String& string)
 
         String options[3] = { F("1 pulse per cycle"), F("2 pulses per cycle"), F("4 pulses per cycle") };
         int optionValues[3] = { 1, 2, 4 };
-        addFormSelector(string, F("Mode"), F("qei_mode"), 3, options, optionValues, CONFIG(0));
+        addFormSelector(F("Mode"), F("qei_mode"), 3, options, optionValues, CONFIG(0));
 
-        addFormNumericBox(string, F("Limit min."), F("qei_limitmin"), CONFIG_L(0));
-        addFormNumericBox(string, F("Limit max."), F("qei_limitmax"), CONFIG_L(1));
+        addFormNumericBox(F("Limit min."), F("qei_limitmin"), CONFIG_L(0));
+        addFormNumericBox(F("Limit max."), F("qei_limitmax"), CONFIG_L(1));
 
         success = true;
         break;
@@ -166,6 +167,26 @@ boolean Plugin_059(byte function, struct EventStruct *event, String& string)
         break;
       }
 
+    case PLUGIN_WRITE:
+      {
+        if (Plugin_059_QE)
+        {
+            String log = "";
+            String command = parseString(string, 1);
+            if (command == F("encwrite"))
+            {
+              if (event->Par1 >= 0)
+              {
+                log = String(F("QEI  : ")) + string;
+                addLog(LOG_LEVEL_INFO, log);
+                Plugin_059_QE->write(event->Par1);
+              }
+              success = true; // Command is handled.
+            }
+        }
+        break;
+      }
   }
   return success;
 }
+#endif // USES_P059

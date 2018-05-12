@@ -72,8 +72,20 @@ void breakTime(unsigned long timeInput, struct timeStruct &tm) {
 
 void setTime(unsigned long t) {
   sysTime = (uint32_t)t;
+  applyTimeZone(t);
   nextSyncTime = (uint32_t)t + syncInterval;
   prevMillis = millis();  // restart counting from now (thanks to Korman for this fix)
+  if (Settings.UseRules)
+  {
+    static bool firstUpdate = true;
+    String event = firstUpdate ? F("Time#Initialized") : F("Time#Set");
+    firstUpdate = false;
+    rulesProcessing(event);
+  }
+}
+
+uint32_t getUnixTime() {
+  return sysTime;
 }
 
 unsigned long now() {
@@ -87,9 +99,6 @@ unsigned long now() {
     unsigned long  t = getNtpTime();
     if (t != 0) {
       setTime(t);
-      applyTimeZone(t);
-    } else {
-      nextSyncTime = sysTime + syncInterval;
     }
   }
   uint32_t localSystime = toLocal(sysTime);
@@ -141,9 +150,17 @@ byte second()
 	return tm.Second;
 }
 
+// day of week, sunday is day 1
 int weekday()
 {
   return tm.Wday;
+}
+
+String weekday_str()
+{
+  const int wday(weekday() - 1); // here: Count from Sunday = 0
+  const String weekDays = F("SunMonTueWedThuFriSat");
+  return weekDays.substring(wday * 3, wday * 3 + 3);
 }
 
 void initTime()
@@ -161,9 +178,10 @@ void checkTime()
     PrevMinutes = tm.Minute;
     if (Settings.UseRules)
     {
-      String weekDays = F("AllSunMonTueWedThuFriSat");
-      String event = F("Clock#Time=");
-      event += weekDays.substring(weekday() * 3, weekday() * 3 + 3);
+      String event;
+      event.reserve(21);
+      event = F("Clock#Time=");
+      event += weekday_str();
       event += ",";
       if (hour() < 10)
         event += "0";
@@ -180,68 +198,82 @@ void checkTime()
 
 unsigned long getNtpTime()
 {
-  if (!Settings.UseNTP || !WiFiConnected(100)) {
+  if (!Settings.UseNTP || !WiFiConnected(10)) {
     return 0;
   }
+  IPAddress timeServerIP;
+  String log = F("NTP  : NTP host ");
+  if (Settings.NTPHost[0] != 0) {
+    WiFi.hostByName(Settings.NTPHost, timeServerIP);
+    log += Settings.NTPHost;
+    // When single set host fails, retry again in a minute
+    nextSyncTime = sysTime + 20;
+  }
+  else {
+    // Have to do a lookup eacht time, since the NTP pool always returns another IP
+    String ntpServerName = String(random(0, 3));
+    ntpServerName += F(".pool.ntp.org");
+    WiFi.hostByName(ntpServerName.c_str(), timeServerIP);
+    log += ntpServerName;
+    // When pool host fails, retry can be much sooner
+    nextSyncTime = sysTime + 5;
+  }
+
+  log += F(" (");
+  log += timeServerIP.toString();
+  log += F(")");
+
+  if (!hostReachable(timeServerIP)) {
+    log += F(" unreachable");
+    addLog(LOG_LEVEL_INFO, log);
+    return 0;
+  }
+
   WiFiUDP udp;
   udp.begin(123);
-  for (byte x = 1; x < 4; x++)
-  {
-    String log = F("NTP  : NTP sync request:");
-    log += x;
-    addLog(LOG_LEVEL_DEBUG_MORE, log);
 
-    const int NTP_PACKET_SIZE = 48; // NTP time is in the first 48 bytes of message
-    byte packetBuffer[NTP_PACKET_SIZE]; //buffer to hold incoming & outgoing packets
+  const int NTP_PACKET_SIZE = 48; // NTP time is in the first 48 bytes of message
+  byte packetBuffer[NTP_PACKET_SIZE]; //buffer to hold incoming & outgoing packets
 
-    IPAddress timeServerIP;
-    const char* ntpServerName = "pool.ntp.org";
+  log += F(" queried");
+  addLog(LOG_LEVEL_DEBUG_MORE, log);
 
-    if (Settings.NTPHost[0] != 0)
-      WiFi.hostByName(Settings.NTPHost, timeServerIP);
-    else
-      WiFi.hostByName(ntpServerName, timeServerIP);
+  while (udp.parsePacket() > 0) ; // discard any previously received packets
 
-    log = F("NTP  : NTP send to ");
-    log += timeServerIP.toString();
-    addLog(LOG_LEVEL_DEBUG_MORE, log);
+  memset(packetBuffer, 0, NTP_PACKET_SIZE);
+  packetBuffer[0] = 0b11100011;   // LI, Version, Mode
+  packetBuffer[1] = 0;     // Stratum, or type of clock
+  packetBuffer[2] = 6;     // Polling Interval
+  packetBuffer[3] = 0xEC;  // Peer Clock Precision
+  packetBuffer[12]  = 49;
+  packetBuffer[13]  = 0x4E;
+  packetBuffer[14]  = 49;
+  packetBuffer[15]  = 52;
+  udp.beginPacket(timeServerIP, 123); //NTP requests are to port 123
+  udp.write(packetBuffer, NTP_PACKET_SIZE);
+  udp.endPacket();
 
-    while (udp.parsePacket() > 0) ; // discard any previously received packets
-
-    memset(packetBuffer, 0, NTP_PACKET_SIZE);
-    packetBuffer[0] = 0b11100011;   // LI, Version, Mode
-    packetBuffer[1] = 0;     // Stratum, or type of clock
-    packetBuffer[2] = 6;     // Polling Interval
-    packetBuffer[3] = 0xEC;  // Peer Clock Precision
-    packetBuffer[12]  = 49;
-    packetBuffer[13]  = 0x4E;
-    packetBuffer[14]  = 49;
-    packetBuffer[15]  = 52;
-    udp.beginPacket(timeServerIP, 123); //NTP requests are to port 123
-    udp.write(packetBuffer, NTP_PACKET_SIZE);
-    udp.endPacket();
-
-    uint32_t beginWait = millis();
-    while (!timeOutReached(beginWait + 1000)) {
-      int size = udp.parsePacket();
-      if (size >= NTP_PACKET_SIZE) {
-        udp.read(packetBuffer, NTP_PACKET_SIZE);  // read packet into the buffer
-        unsigned long secsSince1900;
-        // convert four bytes starting at location 40 to a long integer
-        secsSince1900 =  (unsigned long)packetBuffer[40] << 24;
-        secsSince1900 |= (unsigned long)packetBuffer[41] << 16;
-        secsSince1900 |= (unsigned long)packetBuffer[42] << 8;
-        secsSince1900 |= (unsigned long)packetBuffer[43];
-        log = F("NTP  : NTP replied: ");
-        log += timePassedSince(beginWait);
-        log += F(" mSec");
-        addLog(LOG_LEVEL_DEBUG_MORE, log);
-        return secsSince1900 - 2208988800UL;
-      }
+  uint32_t beginWait = millis();
+  while (!timeOutReached(beginWait + 1000)) {
+    int size = udp.parsePacket();
+    if (size >= NTP_PACKET_SIZE) {
+      udp.read(packetBuffer, NTP_PACKET_SIZE);  // read packet into the buffer
+      unsigned long secsSince1900;
+      // convert four bytes starting at location 40 to a long integer
+      secsSince1900 =  (unsigned long)packetBuffer[40] << 24;
+      secsSince1900 |= (unsigned long)packetBuffer[41] << 16;
+      secsSince1900 |= (unsigned long)packetBuffer[42] << 8;
+      secsSince1900 |= (unsigned long)packetBuffer[43];
+      log = F("NTP  : NTP replied: ");
+      log += timePassedSince(beginWait);
+      log += F(" mSec");
+      addLog(LOG_LEVEL_DEBUG_MORE, log);
+      return secsSince1900 - 2208988800UL;
     }
-    log = F("NTP  : No reply");
-    addLog(LOG_LEVEL_DEBUG_MORE, log);
+    delay(10);
   }
+  log = F("NTP  : No reply");
+  addLog(LOG_LEVEL_DEBUG_MORE, log);
   return 0;
 }
 
@@ -254,7 +286,7 @@ unsigned long getNtpTime()
 // Return the time difference as a signed value, taking into account the timers may overflow.
 // Returned timediff is between -24.9 days and +24.9 days.
 // Returned value is positive when "next" is after "prev"
-long timeDiff(unsigned long prev, unsigned long next)
+long timeDiff(const unsigned long prev, const unsigned long next)
 {
   long signed_diff = 0;
   // To cast a value to a signed long, the difference may not exceed half the ULONG_MAX
@@ -298,7 +330,21 @@ boolean timeOutReached(unsigned long timer)
   return passed >= 0;
 }
 
-
+void setNextTimeInterval(unsigned long& timer, const unsigned long step) {
+  timer += step;
+  const long passed = timePassedSince(timer);
+  if (passed < 0) {
+    // Event has not yet happened, which is fine.
+    return;
+  }
+  if (static_cast<unsigned long>(passed) > step) {
+    // No need to keep running behind, start again.
+    timer = millis() + step;
+    return;
+  }
+  // Try to get in sync again.
+  timer = millis() + (step - passed);
+}
 
 
 /********************************************************************************************\
@@ -376,16 +422,40 @@ String getDateString()
 
 // returns the current Time separated by the given delimiter
 // time format example with ':' delimiter: 23:59:59 (HH:MM:SS)
-String getTimeString(const timeStruct& ts, char delimiter)
+String getTimeString(const timeStruct& ts, char delimiter, bool am_pm, bool show_seconds)
 {
   char TimeString[20]; //19 digits plus the null char
-  sprintf_P(TimeString, PSTR("%02d%c%02d%c%02d"), ts.Hour, delimiter, ts.Minute, delimiter, ts.Second);
+  if (am_pm) {
+    uint8_t hour(ts.Hour % 12);
+    if (hour == 0) { hour = 12; }
+    const char a_or_p = ts.Hour < 12 ? 'A' : 'P';
+    if (show_seconds) {
+      sprintf_P(TimeString, PSTR("%d%c%02d%c%02d %cM"),
+        hour, delimiter, ts.Minute, delimiter, ts.Second, a_or_p);
+    } else {
+      sprintf_P(TimeString, PSTR("%d%c%02d %cM"),
+        hour, delimiter, ts.Minute, a_or_p);
+    }
+  } else {
+    if (show_seconds) {
+      sprintf_P(TimeString, PSTR("%02d%c%02d%c%02d"),
+        ts.Hour, delimiter, ts.Minute, delimiter, ts.Second);
+    } else {
+      sprintf_P(TimeString, PSTR("%d%c%02d"),
+        ts.Hour, delimiter, ts.Minute);
+    }
+  }
   return TimeString;
 }
 
-String getTimeString(char delimiter)
+String getTimeString(char delimiter, bool show_seconds /*=true*/)
 {
-  return getTimeString(tm, delimiter);
+  return getTimeString(tm, delimiter, false, show_seconds);
+}
+
+String getTimeString_ampm(char delimiter, bool show_seconds /*=true*/)
+{
+  return getTimeString(tm, delimiter, true, show_seconds);
 }
 
 // returns the current Time without delimiter
@@ -395,26 +465,35 @@ String getTimeString()
 	return getTimeString('\0');
 }
 
+String getTimeString_ampm()
+{
+	return getTimeString_ampm('\0');
+}
+
 // returns the current Date and Time separated by the given delimiter
 // if called like this: getDateTimeString('\0', '\0', '\0');
 // it will give back this: 20161231235959  (YYYYMMDDHHMMSS)
-String getDateTimeString(const timeStruct& ts, char dateDelimiter, char timeDelimiter,  char dateTimeDelimiter)
+String getDateTimeString(const timeStruct& ts, char dateDelimiter, char timeDelimiter,  char dateTimeDelimiter, bool am_pm)
 {
 	String ret = getDateString(ts, dateDelimiter);
 	if (dateTimeDelimiter != '\0')
 		ret += dateTimeDelimiter;
-	ret += getTimeString(ts, timeDelimiter);
+	ret += getTimeString(ts, timeDelimiter, am_pm, true);
 	return ret;
 }
 
 String getDateTimeString(char dateDelimiter, char timeDelimiter,  char dateTimeDelimiter) {
-  return getDateTimeString(tm, dateDelimiter, timeDelimiter, dateTimeDelimiter);
+  return getDateTimeString(tm, dateDelimiter, timeDelimiter, dateTimeDelimiter, false);
+}
+
+String getDateTimeString_ampm(char dateDelimiter, char timeDelimiter,  char dateTimeDelimiter) {
+  return getDateTimeString(tm, dateDelimiter, timeDelimiter, dateTimeDelimiter, true);
 }
 
 /********************************************************************************************\
   Convert a string like "Sun,12:30" into a 32 bit integer
   \*********************************************************************************************/
-unsigned long string2TimeLong(String &str)
+unsigned long string2TimeLong(const String &str)
 {
   // format 0000WWWWAAAABBBBCCCCDDDD
   // WWWW=weekday, AAAA=hours tens digit, BBBB=hours, CCCC=minutes tens digit DDDD=minutes
@@ -423,8 +502,12 @@ unsigned long string2TimeLong(String &str)
   char TmpStr1[10];
   int w, x, y;
   unsigned long a;
-  str.toLowerCase();
-  str.toCharArray(command, 20);
+  {
+    // Within a scope so the tmpString is only used for copy.
+    String tmpString(str);
+    tmpString.toLowerCase();
+    tmpString.toCharArray(command, 20);
+  }
   unsigned long lngTime = 0;
 
   if (GetArgv(command, TmpStr1, 1))
