@@ -267,11 +267,11 @@
 
 #define CONTROLLER_MAX                      3 // max 4!
 #define NOTIFICATION_MAX                    3 // max 4!
-#define VARS_PER_TASK                       4
+#define VARS_PER_TASK                       8 // as we only have to send 6 vars to domoticz for electicity, we may want to drop this down to 6, but P1 provides 8+ variables
 #define PLUGIN_MAX                DEVICES_MAX
 #define PLUGIN_CONFIGVAR_MAX                8
-#define PLUGIN_CONFIGFLOATVAR_MAX           4
-#define PLUGIN_CONFIGLONGVAR_MAX            4
+#define PLUGIN_CONFIGFLOATVAR_MAX           8
+#define PLUGIN_CONFIGLONGVAR_MAX            8
 #define PLUGIN_EXTRACONFIGVAR_MAX          16
 #define CPLUGIN_MAX                        16
 #define NPLUGIN_MAX                         4
@@ -308,6 +308,8 @@
 #define SENSOR_TYPE_DUAL                    5
 #define SENSOR_TYPE_TRIPLE                  6
 #define SENSOR_TYPE_QUAD                    7
+#define SENSOR_TYPE_PENTA                   8
+#define SENSOR_TYPE_HEXA                    9
 #define SENSOR_TYPE_SWITCH                 10
 #define SENSOR_TYPE_DIMMER                 11
 #define SENSOR_TYPE_LONG                   20
