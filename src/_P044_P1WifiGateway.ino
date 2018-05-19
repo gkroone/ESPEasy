@@ -123,11 +123,10 @@ boolean Plugin_044(byte function, struct EventStruct *event, String& string)
         addFormSelector(F("Parity"), F("plugin_044_parity"), 3, options, optionValues, choice);
 
       	addFormNumericBox(F("Stop bits"), F("plugin_044_stop"), ExtraTaskSettings.TaskDevicePluginConfigLong[4]);
-        addFormNumericBox(F("RX Receive Timeout (mSec)"), F("plugin_044_rxwait"), Settings.TaskDevicePluginConfig[event->TaskIndex][0]);
-      //	addFormPinSelect(F("R"), F("taskdevicepin1"), Settings.TaskDevicePin1[event->TaskIndex]);
-      //  addFormPinSelect(F("Reset target after boot"), F("taskdevicepin1"), Settings.TaskDevicePin1[event->TaskIndex]);
 
-  //      addFormNumericBox(F("RX Receive Timeout (mSec)"), F("plugin_044_rxwait"), Settings.TaskDevicePluginConfig[event->TaskIndex][0]);
+        addFormPinSelect(F("Reset target after boot"), F("taskdevicepin1"), Settings.TaskDevicePin1[event->TaskIndex]);
+
+        addFormNumericBox(F("RX Receive Timeout (mSec)"), F("plugin_044_rxwait"), Settings.TaskDevicePluginConfig[event->TaskIndex][0]);
 //P1 meter provides data for multiple domoticz idx devices. currently focus on gas, power and voltage. Amps may also be present, but is ignored.
 //      	addFormNumericBox(F("G idx"), F("plugin_044_gas"), ExtraTaskSettings.TaskDevicePluginConfigLong[5]);
 //      	addFormNumericBox(F("E idx"), F("plugin_044_elec"), ExtraTaskSettings.TaskDevicePluginConfigLong[6]);

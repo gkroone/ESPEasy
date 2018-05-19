@@ -269,7 +269,7 @@
 #define NOTIFICATION_MAX                    3 // max 4!
 #define VARS_PER_TASK                       8 // as we only have to send 6 vars to domoticz for electicity, we may want to drop this down to 6, but P1 provides 8+ variables
 #define PLUGIN_MAX                DEVICES_MAX
-#define PLUGIN_CONFIGVAR_MAX                8
+#define PLUGIN_CONFIGVAR_MAX                9
 #define PLUGIN_CONFIGFLOATVAR_MAX           8
 #define PLUGIN_CONFIGLONGVAR_MAX            8
 #define PLUGIN_EXTRACONFIGVAR_MAX          16
